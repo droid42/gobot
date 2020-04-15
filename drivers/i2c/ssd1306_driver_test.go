@@ -119,10 +119,11 @@ func TestSSD1306DriverName(t *testing.T) {
 }
 
 func TestSSD1306DriverOptions(t *testing.T) {
-	s := NewSSD1306Driver(newI2cTestAdaptor(), WithBus(2), WithSSD1306DisplayHeight(32), WithSSD1306DisplayWidth(128))
+	s := NewSSD1306Driver(newI2cTestAdaptor(), WithBus(2), WithSSD1306DisplayHeight(32), WithSSD1306DisplayWidth(128), WithSSD1306DisplayOrientation(SSD1306Flipped))
 	gobottest.Assert(t, s.GetBusOrDefault(1), 2)
 	gobottest.Assert(t, s.displayHeight, 32)
 	gobottest.Assert(t, s.displayWidth, 128)
+	gobottest.Assert(t, s.displayFlipped, true)
 }
 
 func TestSSD1306DriverDisplay(t *testing.T) {
@@ -203,6 +204,49 @@ func TestSSD1306DriverOff(t *testing.T) {
 	}
 	err := s.Off()
 	gobottest.Assert(t, err, nil)
+}
+
+func TestSSD1306DriverOrientationFlipped(t *testing.T) {
+	s, adaptor := initTestSSD1306DriverWithStubbedAdaptor(128, 64, false)
+	s.Start()
+
+	adaptor.i2cWriteImpl = func(got []byte) (int, error) {
+		expected := []byte{0x80, ssd1306SetSegmentRemap127, 0x80, ssd1306SetComOutput8}
+		if !reflect.DeepEqual(got, expected) {
+			t.Logf("sequence error, got %+v, expected %+v", got, expected)
+			return 0, fmt.Errorf("oops")
+		}
+		return 0, nil
+	}
+	err := s.Orientation(SSD1306Flipped)
+	gobottest.Assert(t, err, nil)
+}
+
+func TestSSD1306DriverOrientationNormal(t *testing.T) {
+	s, adaptor := initTestSSD1306DriverWithStubbedAdaptor(128, 64, false)
+	s.Start()
+
+	// Normal
+	adaptor.i2cWriteImpl = func(got []byte) (int, error) {
+		expected := []byte{0x80, ssd1306SetSegmentRemap0, 0x80, ssd1306SetComOutput0}
+		if !reflect.DeepEqual(got, expected) {
+			t.Logf("sequence error, got %+v, expected %+v", got, expected)
+			return 0, fmt.Errorf("oops")
+		}
+		return 0, nil
+	}
+	err := s.Orientation(SSD1306Normal)
+	gobottest.Assert(t, err, nil)
+}
+
+func TestSSD1306DriverOrientationInvalid(t *testing.T) {
+	s, _ := initTestSSD1306DriverWithStubbedAdaptor(128, 64, false)
+	s.Start()
+
+	// Invalid
+	const invalid = 0
+	err := s.Orientation(invalid)
+	gobottest.Assert(t, err, fmt.Errorf("invalid orientation %d", invalid))
 }
 
 func TestSSD1306Reset(t *testing.T) {

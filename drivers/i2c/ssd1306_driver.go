@@ -56,6 +56,13 @@ const (
 	ssd1306ChargePumpSetting = 0x8D
 )
 
+type orientation int
+
+const (
+	SSD1306Normal  orientation = 1
+	SSD1306Flipped orientation = 2
+)
+
 // SSD1306Init contains the initialization settings for the ssd1306 display.
 type SSD1306Init struct {
 	displayClock         byte
@@ -64,6 +71,8 @@ type SSD1306Init struct {
 	startLine            byte
 	chargePumpSetting    byte
 	memoryAddressingMode byte
+	comOutput            byte
+	comSegmentRemap      byte
 	comPins              byte
 	contrast             byte
 	prechargePeriod      byte
@@ -81,8 +90,8 @@ func (i *SSD1306Init) GetSequence() []byte {
 		ssd1306SetStartLine | i.startLine,
 		ssd1306ChargePumpSetting, i.chargePumpSetting,
 		ssd1306SetMemoryAddressingMode, i.memoryAddressingMode,
-		ssd1306SetSegmentRemap0,
-		ssd1306SetComOutput0,
+		i.comSegmentRemap,
+		i.comOutput,
 		ssd1306SetComPins, i.comPins,
 		ssd1306SetContrast, i.contrast,
 		ssd1306SetPrechargePeriod, i.prechargePeriod,
@@ -100,6 +109,8 @@ var ssd1306Init128x64 = &SSD1306Init{
 	startLine:            0x00,
 	chargePumpSetting:    0x14, // 0x10 if external vcc is set
 	memoryAddressingMode: 0x00,
+	comOutput:            ssd1306SetSegmentRemap0,
+	comSegmentRemap:      ssd1306SetComOutput0,
 	comPins:              0x12,
 	contrast:             0xCF, // 0x9F if external vcc is set
 	prechargePeriod:      0xF1, // 0x22 if external vcc is set
@@ -114,6 +125,8 @@ var ssd1306Init128x32 = &SSD1306Init{
 	startLine:            0x00,
 	chargePumpSetting:    0x14, // 0x10 if external vcc is set
 	memoryAddressingMode: 0x00,
+	comOutput:            ssd1306SetSegmentRemap0,
+	comSegmentRemap:      ssd1306SetComOutput0,
 	comPins:              0x02,
 	contrast:             0x8F, // 0x9F if external vcc is set
 	prechargePeriod:      0xF1, // 0x22 if external vcc is set
@@ -128,6 +141,8 @@ var ssd1306Init96x16 = &SSD1306Init{
 	startLine:            0x00,
 	chargePumpSetting:    0x14, // 0x10 if external vcc is set
 	memoryAddressingMode: 0x00,
+	comOutput:            ssd1306SetSegmentRemap0,
+	comSegmentRemap:      ssd1306SetComOutput0,
 	comPins:              0x02,
 	contrast:             0x8F, // 0x9F if external vcc is set
 	prechargePeriod:      0xF1, // 0x22 if external vcc is set
@@ -168,7 +183,7 @@ func (d *DisplayBuffer) SetPixel(x, y, c int) {
 	if c == 0 {
 		d.buffer[idx] &= ^(1 << bit)
 	} else {
-		d.buffer[idx] |= (1 << bit)
+		d.buffer[idx] |= 1 << bit
 	}
 }
 
@@ -184,12 +199,13 @@ type SSD1306Driver struct {
 	connection Connection
 	Config
 	gobot.Commander
-	initSequence  *SSD1306Init
-	displayWidth  int
-	displayHeight int
-	externalVCC   bool
-	pageSize      int
-	buffer        *DisplayBuffer
+	initSequence   *SSD1306Init
+	displayWidth   int
+	displayHeight  int
+	displayFlipped bool
+	externalVCC    bool
+	pageSize       int
+	buffer         *DisplayBuffer
 }
 
 // NewSSD1306Driver creates a new SSD1306Driver.
@@ -202,6 +218,7 @@ type SSD1306Driver struct {
 //        WithAddress(int):    		address to use with this driver
 //        WithSSD1306DisplayWidth(int): 	width of display (defaults to 128)
 //        WithSSD1306DisplayHeight(int): 	height of display (defaults to 64)
+//        WithSSD1306DisplayFlipped(bool):  display orientation flipped / rotated 180 degrees
 //        WithSSD1306ExternalVCC:          set true when using an external OLED supply (defaults to false)
 //
 func NewSSD1306Driver(a Connector, options ...func(Config)) *SSD1306Driver {
@@ -282,6 +299,10 @@ func (s *SSD1306Driver) Start() (err error) {
 		s.initSequence.contrast = 0x9F
 		s.initSequence.prechargePeriod = 0x22
 	}
+	if s.displayFlipped {
+		s.initSequence.comOutput = ssd1306SetComOutput8
+		s.initSequence.comSegmentRemap = ssd1306SetSegmentRemap127
+	}
 	bus := s.GetBusOrDefault(s.connector.GetDefaultBus())
 	address := s.GetAddressOrDefault(ssd1306I2CAddress)
 	s.connection, err = s.connector.GetConnection(address, bus)
@@ -330,6 +351,16 @@ func WithSSD1306ExternalVCC(val bool) func(Config) {
 	}
 }
 
+// WithSSD1306DisplayOrientation option configured the SSD1306Driver COM Output Scan Direction and COM Hardware Config for desired display orientation.
+func WithSSD1306DisplayOrientation(o orientation) func(Config) {
+	return func(c Config) {
+		d, ok := c.(*SSD1306Driver)
+		if ok {
+			d.displayFlipped = o == SSD1306Flipped
+		}
+	}
+}
+
 // Init initializes the ssd1306 display.
 func (s *SSD1306Driver) Init() (err error) {
 	// turn off screen
@@ -357,6 +388,18 @@ func (s *SSD1306Driver) On() (err error) {
 // Off turns off the display.
 func (s *SSD1306Driver) Off() (err error) {
 	return s.command(ssd1306SetDisplayOff)
+}
+
+// Orientation sets the display orientation on next Display().
+func (s *SSD1306Driver) Orientation(o orientation) (err error) {
+	switch o {
+	case SSD1306Flipped:
+		return s.commands([]byte{ssd1306SetSegmentRemap127, ssd1306SetComOutput8})
+	case SSD1306Normal:
+		return s.commands([]byte{ssd1306SetSegmentRemap0, ssd1306SetComOutput0})
+	default:
+		return fmt.Errorf("invalid orientation %d", o)
+	}
 }
 
 // Clear clears the display buffer.
