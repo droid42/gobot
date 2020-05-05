@@ -60,6 +60,7 @@ const (
 
 	GREENTAB   Model = 0
 	MINI80x160 Model = 1
+	TFT128x128 Model = 2
 
 	NO_ROTATION  Rotation = 0
 	ROTATION_90  Rotation = 1 // 90 degrees clock-wise rotation
@@ -278,6 +279,8 @@ func (d *ST7735Driver) Configure(cfg ST7735Config) {
 	} else if d.model == MINI80x160 {
 		d.isBGR = true
 		d.InvertColors(true)
+	} else if d.model == TFT128x128 {
+		d.isBGR = true
 	}
 
 	// common color adjustment
@@ -460,7 +463,7 @@ func (d *ST7735Driver) DrawFastHLine(x0, x1, y int16, c color.RGBA) {
 	if x0 > x1 {
 		x0, x1 = x1, x0
 	}
-	d.FillRectangle(x0, y, x1-x0+1, y, c)
+	d.FillRectangle(x0, y, x1-x0+1, 1, c)
 }
 
 // FillScreen fills the screen with a given color
